@@ -1,0 +1,2089 @@
+﻿(function () {
+    'use strict';
+
+    const CONFIG = {
+        enableProtection: true,
+        enableIntegrityCheck: true,
+        enableDOMMonitoring: true,
+        enableNetworkMonitoring: true,
+        enableDevToolsProtection: true,
+        enableMemoryProtection: true,
+        strictMode: true,
+        enableTrustedTypes: true,
+        enableCSPEnforcement: true,
+        enableDOMSanitization: true,
+        enableViolationReporting: true,
+        reportEndpoint: '/api/csp-report',
+        logViolations: true,
+        enableEnhancedDOMProtection: true,
+        enableDataObfuscation: true,
+        enableAutoWipe: true,
+
+        enableDOMEncryption: true,
+        enableShadowDOMProtection: true,
+        enableFormProtection: true,
+        enableClipboardProtection: true,
+        enableInputMasking: true,
+        enableMemoryWiping: true,
+        enableAutoLogoutOnSuspiciousActivity: true,
+        suspiciousActivityThreshold: 5,
+        sessionTimeout: 30 * 60 * 1000,
+        encryptionKey: null /
+       
+
+
+    };
+
+    const DataObfuscation = {
+        obfuscatedElements: new WeakMap(),
+        decoyData: new Map(),
+
+        init() {
+            this.createDecoyElements();
+            this.obfuscateRealData();
+            this.setupHoneyPots();
+        },
+
+        createDecoyElements() {
+            // Create fake form elements that extensions might target
+            const decoys = [
+                { type: 'password', name: 'fake_password_1', value: 'decoy_data_' + Math.random() },
+                { type: 'email', name: 'fake_email_1', value: 'decoy@example.com' },
+                { type: 'hidden', name: 'fake_token_1', value: 'fake_csrf_' + Math.random() }
+            ];
+
+            decoys.forEach(decoy => {
+                const input = document.createElement('input');
+                input.type = decoy.type;
+                input.name = decoy.name;
+                input.value = decoy.value;
+                input.style.cssText = 'position:absolute;left:-9999px;opacity:0;pointer-events:none;';
+                input.tabIndex = -1;
+
+                // Mark as decoy for our own tracking
+                this.decoyData.set(input, true);
+
+                // Add to DOM in hidden location
+                if (document.body) {
+                    document.body.appendChild(input);
+                }
+            });
+
+            // Monitor access to decoy elements
+            this.monitorDecoyAccess();
+        },
+
+        monitorDecoyAccess() {
+            this.decoyData.forEach((isDecoy, element) => {
+                const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+
+                Object.defineProperty(element, 'value', {
+                    get: function () {
+                        // Accessing decoy = suspicious!
+                        console.error('Decoy element accessed!');
+                        SuspiciousActivityMonitor.recordActivity('decoy-access');
+                        ExtensionDetector.blockExtension();
+                        return descriptor.get.call(this);
+                    },
+                    set: descriptor.set
+                });
+            });
+        },
+
+        obfuscateRealData() {
+            // Add random attributes to confuse scrapers
+            document.querySelectorAll('input, select, textarea').forEach(element => {
+                if (!this.decoyData.has(element)) {
+                    // Add random data attributes
+                    element.setAttribute('data-field-id', this.generateRandomId());
+                    element.setAttribute('data-validation', this.generateRandomId());
+
+                    // Randomize IDs and names temporarily during idle time
+                    const originalId = element.id;
+                    const originalName = element.name;
+
+                    this.obfuscatedElements.set(element, {
+                        originalId: originalId,
+                        originalName: originalName
+                    });
+                }
+            });
+        },
+
+        generateRandomId() {
+            return 'id_' + Math.random().toString(36).substring(2, 15);
+        },
+
+        setupHoneyPots() {
+            // Create honeypot forms that trigger alerts if accessed
+            const honeypotForm = document.createElement('form');
+            honeypotForm.style.display = 'none';
+            honeypotForm.innerHTML = `
+                <input type="text" name="honeypot_username" value="">
+                <input type="password" name="honeypot_password" value="">
+                <input type="hidden" name="honeypot_token" value="trap">
+            `;
+
+            honeypotForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                console.error('Honeypot form submitted!');
+                SuspiciousActivityMonitor.recordActivity('honeypot-triggered');
+                ExtensionDetector.blockExtension();
+            });
+
+            if (document.body) {
+                document.body.appendChild(honeypotForm);
+            }
+        }
+    };
+
+    const TamperDetection = {
+        originalFunctions: new Map(),
+        functionHashes: new Map(),
+
+        init: function () {
+            this.storeOriginals();
+            this.monitorTampering();
+            this.protectPrototypes();
+        },
+
+        storeOriginals: function () {
+            const criticalFunctions = [
+                { obj: window, name: 'fetch' },
+                { obj: window, name: 'XMLHttpRequest' },
+                { obj: Document.prototype, name: 'createElement' },
+                { obj: Document.prototype, name: 'createElementNS' },
+                { obj: Element.prototype, name: 'setAttribute' },
+                { obj: Element.prototype, name: 'getAttribute' },
+                { obj: Node.prototype, name: 'appendChild' },
+                { obj: Node.prototype, name: 'insertBefore' },
+                { obj: Node.prototype, name: 'removeChild' },
+                { obj: document, name: 'write' },
+                { obj: document, name: 'writeln' },
+                { obj: window, name: 'eval' },
+                { obj: Function.prototype, name: 'call' },
+                { obj: Function.prototype, name: 'apply' },
+                { obj: Object, name: 'defineProperty' },
+                { obj: Object, name: 'defineProperties' },
+                // NEW: Additional critical functions
+                { obj: HTMLInputElement.prototype, name: 'value' },
+                { obj: HTMLFormElement.prototype, name: 'submit' },
+                { obj: Element.prototype, name: 'innerHTML' },
+                { obj: Element.prototype, name: 'outerHTML' }
+            ];
+
+            criticalFunctions.forEach(({ obj, name }) => {
+                try {
+                    const fn = obj[name];
+                    if (fn) {
+                        const key = `${obj.constructor.name}.${name}`;
+                        this.originalFunctions.set(key, fn);
+                        this.functionHashes.set(key, fn.toString());
+                    }
+                } catch (e) {
+                    console.warn('Could not store function:', name);
+                }
+            });
+        },
+
+        monitorTampering: function () {
+            setInterval(() => {
+                this.functionHashes.forEach((originalHash, key) => {
+                    const [objName, fnName] = key.split('.');
+                    let currentFn;
+
+                    try {
+                        if (objName === 'Window') currentFn = window[fnName];
+                        else if (objName === 'Document') currentFn = document[fnName];
+                        else if (objName === 'HTMLDocument') currentFn = Document.prototype[fnName];
+                        else if (objName === 'Element') currentFn = Element.prototype[fnName];
+                        else if (objName === 'Node') currentFn = Node.prototype[fnName];
+                        else if (objName === 'Function') currentFn = Function.prototype[fnName];
+                        else if (objName === 'Object') currentFn = Object[fnName];
+                        else if (objName === 'HTMLInputElement') currentFn = HTMLInputElement.prototype[fnName];
+                        else if (objName === 'HTMLFormElement') currentFn = HTMLFormElement.prototype[fnName];
+
+                        if (currentFn && currentFn.toString() !== originalHash) {
+                            this.triggerLockdown('Function tampering detected: ' + key);
+                        }
+                    } catch (e) {
+                        console.warn('Error checking function:', key);
+                    }
+                });
+            }, 500);
+        },
+
+        protectPrototypes() {
+            // Freeze prototypes to prevent modification
+            try {
+                Object.freeze(HTMLInputElement.prototype);
+                Object.freeze(HTMLFormElement.prototype);
+                Object.freeze(HTMLElement.prototype);
+            } catch (e) {
+                console.warn('Could not freeze prototypes');
+            }
+        },
+
+        triggerLockdown: function (reason) {
+            console.error('Security Violation:', reason);
+            ExtensionDetector.detected = true;
+            ExtensionDetector.blockExtension();
+        }
+    };
+
+    // DevTools Detection
+    const DevToolsDetection = {
+        isOpen: false,
+        checkInterval: null,
+
+        init: function () {
+            this.detectDevTools();
+            this.monitorConsole();
+            this.detectDebugger();
+        },
+
+        detectDevTools: function () {
+            // Method 1: Console detection
+            const element = new Image();
+            Object.defineProperty(element, 'id', {
+                get: function () {
+                    DevToolsDetection.isOpen = true;
+                    if (CONFIG.enableDevToolsProtection) {
+                        ExtensionDetector.blockExtension();
+                    }
+                    throw new Error('DevTools detected');
+                }
+            });
+
+            setInterval(() => {
+                console.dir(element);
+                console.clear();
+            }, 1000);
+
+            // Method 2: Timing-based detection
+            setInterval(() => {
+                const start = performance.now();
+                debugger;
+                const end = performance.now();
+                if (end - start > 100) {
+                    this.isOpen = true;
+                    if (CONFIG.enableDevToolsProtection) {
+                        ExtensionDetector.blockExtension();
+                    }
+                }
+            }, 1000);
+
+            // Method 3: Window size detection
+            setInterval(() => {
+                const widthThreshold = window.outerWidth - window.innerWidth > 160;
+                const heightThreshold = window.outerHeight - window.innerHeight > 160;
+                if (widthThreshold || heightThreshold) {
+                    this.isOpen = true;
+                    if (CONFIG.enableDevToolsProtection) {
+                        ExtensionDetector.blockExtension();
+                    }
+                }
+            }, 500);
+        },
+
+        monitorConsole: function () {
+            const originalLog = console.log;
+            console.log = function (...args) {
+                const stack = new Error().stack;
+                if (stack && stack.includes('extension://')) {
+                    ExtensionDetector.detected = true;
+                    ExtensionDetector.blockExtension();
+                }
+                return originalLog.apply(console, args);
+            };
+        },
+
+        detectDebugger: function () {
+            setInterval(() => {
+                const before = new Date();
+                debugger;
+                const after = new Date();
+                if (after - before > 100) {
+                    if (CONFIG.enableDevToolsProtection) {
+                        ExtensionDetector.blockExtension();
+                    }
+                }
+            }, 2000);
+        }
+    };
+
+    // Memory Protection
+    const MemoryProtection = {
+        protectedData: new WeakMap(),
+        memoryMonitor: null,
+
+        init: function () {
+            this.protectVariables();
+            this.monitorMemoryLeaks();
+            this.preventMemoryDumps();
+        },
+
+        protectVariables: function () {
+            // Freeze critical objects
+            try {
+                Object.freeze(Object.prototype);
+                Object.freeze(Array.prototype);
+                Object.freeze(Function.prototype);
+            } catch (e) {
+                console.warn('Could not freeze prototypes');
+            }
+        },
+
+        monitorMemoryLeaks: function () {
+            let lastMemory = performance.memory?.usedJSHeapSize || 0;
+
+            setInterval(() => {
+                if (performance.memory) {
+                    const currentMemory = performance.memory.usedJSHeapSize;
+                    const diff = currentMemory - lastMemory;
+
+                    if (diff > 10000000) { // 10MB
+                        console.warn('Suspicious memory increase detected');
+                        ExtensionDetector.blockExtension();
+                    }
+                    lastMemory = currentMemory;
+                }
+            }, 3000);
+        },
+
+        preventMemoryDumps: function () {
+            if (window.performance && window.performance.memory) {
+                Object.defineProperty(window.performance, 'memory', {
+                    get: function () {
+                        return undefined;
+                    }
+                });
+            }
+        }
+    };
+
+    // Enhanced Security Token Management
+    const SecurityToken = {
+        get: function () {
+            return document.cookie.split('; ')
+                .find(row => row.startsWith('__RequestVerificationToken='))
+                ?.split('=')[1] || '';
+        },
+
+        validate: function () {
+            const token = this.get();
+            return token && token.length > 0;
+        },
+
+        rotate: function () {
+            const token = this.get();
+            if (token) {
+                const tokenParts = token.split('.');
+                if (tokenParts.length !== 3) {
+                    ExtensionDetector.blockExtension();
+                }
+            }
+        }
+    };
+
+    // Proxy/Wrapper Detection
+    const ProxyDetection = {
+        init: function () {
+            this.detectProxies();
+            this.preventProxyCreation();
+        },
+
+        detectProxies: function () {
+            const testObj = {};
+            try {
+                const handler = {
+                    get: function () { return true; }
+                };
+                const proxy = new Proxy(testObj, handler);
+
+                if (window.Proxy) {
+                    const originalProxy = window.Proxy;
+                    window.Proxy = function (...args) {
+                        console.warn('Proxy creation detected');
+                        return new originalProxy(...args);
+                    };
+                }
+            } catch (e) { }
+        },
+
+        preventProxyCreation: function () {
+            const originalDefineProperty = Object.defineProperty;
+            Object.defineProperty = function (obj, prop, descriptor) {
+                const stack = new Error().stack;
+                if (stack && stack.includes('extension://')) {
+                    ExtensionDetector.blockExtension();
+                    return obj;
+                }
+                return originalDefineProperty(obj, prop, descriptor);
+            };
+        }
+    };
+
+    // Enhanced Extension Detection
+    const ExtensionDetector = {
+        detected: false,
+        detectionCount: 0,
+
+        checkForExtensions: function () {
+            const indicators = [
+                // Script sources
+                () => {
+                    const scripts = document.querySelectorAll('script');
+                    for (let script of scripts) {
+                        const src = script.src || '';
+                        if (src.includes('-extension://') ||
+                            src.includes('chrome-extension://') ||
+                            src.includes('moz-extension://') ||
+                            src.includes('safari-extension://') ||
+                            src.includes('edge-extension://') ||
+                            src.includes('opera-extension://')) {
+                            return true;
+                        }
+                    }
+                    return false;
+                },
+
+                // iframes
+                () => {
+                    const iframes = document.querySelectorAll('iframe');
+                    for (let iframe of iframes) {
+                        const src = iframe.src || '';
+                        if (src.includes('-extension://')) {
+                            return true;
+                        }
+                    }
+                    return false;
+                },
+
+                // Stylesheets
+                () => {
+                    const links = document.querySelectorAll('link[rel="stylesheet"]');
+                    for (let link of links) {
+                        const href = link.href || '';
+                        if (href.includes('-extension://')) {
+                            return true;
+                        }
+                    }
+                    return false;
+                },
+
+                // Shadow DOM
+                () => {
+                    const allElements = document.querySelectorAll('*');
+                    for (let el of allElements) {
+                        if (el.shadowRoot) {
+                            const shadowScripts = el.shadowRoot.querySelectorAll('script');
+                            for (let script of shadowScripts) {
+                                const src = script.src || '';
+                                if (src.includes('-extension://')) {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                    return false;
+                },
+
+                // Element attributes
+                () => {
+                    const allElements = document.querySelectorAll('*');
+                    for (let el of allElements) {
+                        const attrs = el.attributes;
+                        for (let attr of attrs) {
+                            if (attr.name.includes('extension') ||
+                                attr.name.includes('chrome-') ||
+                                attr.name.includes('moz-') ||
+                                attr.value.includes('-extension://')) {
+                                return true;
+                            }
+                        }
+                    }
+                    return false;
+                },
+
+                // Runtime APIs
+                () => {
+                    return window.chrome?.runtime?.id !== undefined ||
+                        window.browser?.runtime?.id !== undefined ||
+                        typeof chrome?.runtime?.sendMessage === 'function' ||
+                        typeof browser?.runtime?.sendMessage === 'function';
+                },
+
+                // Extension hooks
+                () => {
+                    return window.__EXTENSION_HOOK__ !== undefined ||
+                        window.__REACT_DEVTOOLS_GLOBAL_HOOK__ !== undefined ||
+                        window.__REDUX_DEVTOOLS_EXTENSION__ !== undefined ||
+                        window.__VUE_DEVTOOLS_GLOBAL_HOOK__ !== undefined ||
+                        document.documentElement.hasAttribute('data-extension');
+                },
+
+                // Performance timing
+                () => {
+                    if (window.performance && window.performance.getEntriesByType) {
+                        const resources = window.performance.getEntriesByType('resource');
+                        for (let resource of resources) {
+                            if (resource.name.includes('-extension://')) {
+                                return true;
+                            }
+                        }
+                    }
+                    return false;
+                },
+
+                // Global variables
+                () => {
+                    const suspiciousGlobals = [
+                        '__EXTENSION_ID__',
+                        '__CONTENT_SCRIPT__',
+                        'extensionId',
+                        '__TAMPERMONKEY__',
+                        '__GREASEMONKEY__',
+                        'GM_info',
+                        'unsafeWindow'
+                    ];
+
+                    for (let global of suspiciousGlobals) {
+                        if (window[global] !== undefined) {
+                            return true;
+                        }
+                    }
+                    return false;
+                },
+
+                // Modified prototypes
+                () => {
+                    const originalToString = Function.prototype.toString;
+                    try {
+                        const testString = originalToString.call(document.createElement);
+                        return !testString.includes('[native code]');
+                    } catch (e) {
+                        return true;
+                    }
+                },
+
+                // Injected CSS
+                () => {
+                    const sheets = document.styleSheets;
+                    for (let sheet of sheets) {
+                        try {
+                            if (sheet.href && sheet.href.includes('-extension://')) {
+                                return true;
+                            }
+                        } catch (e) {
+                            if (sheet.ownerNode && !sheet.ownerNode.hasAttribute('data-legitimate')) {
+                                return true;
+                            }
+                        }
+                    }
+                    return false;
+                }
+            ];
+
+            for (let check of indicators) {
+                try {
+                    if (check()) {
+                        this.detected = true;
+                        this.detectionCount++;
+                        return true;
+                    }
+                } catch (e) {
+                    // Some checks might throw errors
+                }
+            }
+
+            return false;
+        },
+
+        blockExtension: function () {
+            if (this.detected) {
+                document.documentElement.innerHTML = '';
+                Object.freeze(document.documentElement);
+
+                setTimeout(() => {
+                    window.location.replace('/LMS_LP.aspx');
+                }, 50);
+
+                throw new Error('Security violation detected');
+            }
+        }
+    };
+
+    // Enhanced DOM Protection
+    const DOMProtection = {
+        originalHTML: '',
+        checkInterval: null,
+        mutationCount: 0,
+        suspiciousNodes: new WeakSet(),
+
+        init: function () {
+            this.originalHTML = document.documentElement.outerHTML;
+            this.startMonitoring();
+            this.protectCriticalElements();
+            this.preventInjection();
+        },
+
+        protectCriticalElements: function () {
+            const forms = document.querySelectorAll('form');
+            forms.forEach(form => {
+                Object.defineProperty(form, 'action', {
+                    set: function (value) {
+                        console.warn('Form action modification attempt');
+                        ExtensionDetector.blockExtension();
+                    },
+                    get: function () {
+                        return this.getAttribute('action');
+                    }
+                });
+            });
+
+            const inputs = document.querySelectorAll('input[type="password"], input[type="email"], input[type="text"]');
+            inputs.forEach(input => {
+                input.addEventListener('focus', (e) => {
+                    if (this.suspiciousNodes.has(e.target)) {
+                        e.preventDefault();
+                        ExtensionDetector.blockExtension();
+                    }
+                });
+            });
+        },
+
+        preventInjection: function () {
+            const originalCreateElement = document.createElement;
+            document.createElement = function (tagName) {
+                const element = originalCreateElement.call(document, tagName);
+
+                const stack = new Error().stack;
+                if (stack && stack.includes('extension://')) {
+                    DOMProtection.suspiciousNodes.add(element);
+                    ExtensionDetector.blockExtension();
+                }
+
+                return element;
+            };
+
+            const originalInnerHTMLDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML');
+            Object.defineProperty(Element.prototype, 'innerHTML', {
+                set: function (value) {
+                    if (/<script/i.test(value) || /javascript:/i.test(value)) {
+                        console.error('Script injection attempt blocked');
+                        ExtensionDetector.blockExtension();
+                        return;
+                    }
+                    return originalInnerHTMLDescriptor.set.call(this, value);
+                },
+                get: function () {
+                    return originalInnerHTMLDescriptor.get.call(this);
+                }
+            });
+        },
+
+        startMonitoring: function () {
+            const observer = new MutationObserver((mutations) => {
+                this.mutationCount += mutations.length;
+
+                if (this.mutationCount > 1000) {
+                    console.warn('Excessive DOM mutations detected');
+                    ExtensionDetector.blockExtension();
+                }
+
+                for (let mutation of mutations) {
+                    if (mutation.addedNodes.length > 0) {
+                        for (let node of mutation.addedNodes) {
+                            if (node.nodeType === 1) {
+                                const el = node;
+
+                                if (el.hasAttribute) {
+                                    const attrs = el.attributes;
+                                    for (let attr of attrs) {
+                                        if (attr.name.includes('extension') ||
+                                            attr.name.includes('chrome-') ||
+                                            attr.name.includes('moz-') ||
+                                            attr.value.includes('-extension://')) {
+                                            ExtensionDetector.detected = true;
+                                            ExtensionDetector.blockExtension();
+                                            return;
+                                        }
+                                    }
+                                }
+
+                                if (el.tagName === 'SCRIPT') {
+                                    const src = el.src || '';
+                                    const content = el.textContent || '';
+
+                                    if (src.includes('-extension://') ||
+                                        content.includes('chrome.runtime') ||
+                                        content.includes('browser.runtime') ||
+                                        content.includes('GM_') ||
+                                        content.includes('unsafeWindow')) {
+                                        el.remove();
+                                        ExtensionDetector.detected = true;
+                                        ExtensionDetector.blockExtension();
+                                        return;
+                                    }
+                                }
+
+                                if (el.tagName === 'LINK' && el.rel === 'stylesheet') {
+                                    const href = el.href || '';
+                                    if (href.includes('-extension://')) {
+                                        el.remove();
+                                        ExtensionDetector.detected = true;
+                                        ExtensionDetector.blockExtension();
+                                        return;
+                                    }
+                                }
+
+                                if (el.tagName === 'IFRAME') {
+                                    const src = el.src || '';
+                                    if (src.includes('-extension://') || !src) {
+                                        el.remove();
+                                        ExtensionDetector.detected = true;
+                                        ExtensionDetector.blockExtension();
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (mutation.type === 'attributes') {
+                        const target = mutation.target;
+                        const attrName = mutation.attributeName;
+                        const attrValue = target.getAttribute(attrName);
+
+                        if (attrValue && (
+                            attrValue.includes('-extension://') ||
+                            attrValue.includes('javascript:') ||
+                            attrValue.includes('data:text/html')
+                        )) {
+                            target.removeAttribute(attrName);
+                            ExtensionDetector.blockExtension();
+                        }
+                    }
+                }
+
+                setTimeout(() => {
+                    this.mutationCount = Math.max(0, this.mutationCount - mutations.length);
+                }, 5000);
+            });
+
+            observer.observe(document.documentElement, {
+                childList: true,
+                subtree: true,
+                attributes: true,
+                attributeOldValue: true,
+                characterData: true
+            });
+        },
+
+        verifyIntegrity: function () {
+            const currentHTML = document.documentElement.outerHTML;
+            if (Math.abs(currentHTML.length - this.originalHTML.length) > 10000) {
+                ExtensionDetector.detected = true;
+                ExtensionDetector.blockExtension();
+            }
+        }
+    };
+
+    // Enhanced Network Protection
+    const NetworkProtection = {
+        requestCount: 0,
+        requestLog: [],
+
+        init: function () {
+            this.interceptFetch();
+            this.interceptXHR();
+            this.monitorWebSockets();
+            this.monitorRequests();
+        },
+
+        interceptFetch: function () {
+            const originalFetch = window.fetch;
+            window.fetch = function (...args) {
+                NetworkProtection.requestCount++;
+                NetworkProtection.requestLog.push({
+                    url: args[0],
+                    time: Date.now()
+                });
+
+                const url = args[0];
+                const options = args[1] || {};
+
+                if (typeof url === 'string') {
+                    if (url.includes('-extension://') ||
+                        url.includes('localhost:') ||
+                        url.match(/\d+\.\d+\.\d+\.\d+/)) {
+                        console.error('Blocked suspicious fetch request');
+                        return Promise.reject(new Error('Blocked'));
+                    }
+                }
+
+                if (!options.headers) {
+                    options.headers = {};
+                }
+
+                options.headers['X-CSRF-Token'] = SecurityToken.get();
+                options.headers['X-Requested-With'] = 'XMLHttpRequest';
+                options.headers['X-Security-Check'] = 'enabled';
+
+                Object.defineProperty(options, 'credentials', {
+                    value: 'same-origin',
+                    writable: false,
+                    configurable: false
+                });
+
+                return originalFetch.apply(this, [url, options]);
+            };
+        },
+
+        interceptXHR: function () {
+            const originalOpen = XMLHttpRequest.prototype.open;
+            const originalSend = XMLHttpRequest.prototype.send;
+
+            XMLHttpRequest.prototype.open = function (...args) {
+                this._url = args[1];
+
+                if (typeof this._url === 'string') {
+                    if (this._url.includes('-extension://')) {
+                        console.error('Blocked suspicious XHR');
+                        return;
+                    }
+                }
+
+                return originalOpen.apply(this, args);
+            };
+
+            XMLHttpRequest.prototype.send = function (...args) {
+                this.setRequestHeader('X-CSRF-Token', SecurityToken.get());
+                this.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+                this.setRequestHeader('X-Security-Check', 'enabled');
+
+                return originalSend.apply(this, args);
+            };
+        },
+
+        monitorWebSockets: function () {
+            const originalWebSocket = window.WebSocket;
+            window.WebSocket = function (url, protocols) {
+                console.log('WebSocket connection attempt:', url);
+
+                if (url.includes('localhost') || url.match(/\d+\.\d+\.\d+\.\d+/)) {
+                    throw new Error('WebSocket connection blocked');
+                }
+
+                return new originalWebSocket(url, protocols);
+            };
+        },
+
+        monitorRequests: function () {
+            setInterval(() => {
+                const now = Date.now();
+                this.requestLog = this.requestLog.filter(req => now - req.time < 60000);
+
+                if (this.requestLog.length > 100) {
+                    console.warn('Excessive network requests detected');
+                    ExtensionDetector.blockExtension();
+                }
+            }, 5000);
+        }
+    };
+
+    // Style Protection
+    const StyleProtection = {
+        init: function () {
+            const observer = new MutationObserver((mutations) => {
+                for (let mutation of mutations) {
+                    if (mutation.addedNodes.length > 0) {
+                        for (let node of mutation.addedNodes) {
+                            if (node.tagName === 'LINK' && node.rel === 'stylesheet') {
+                                const href = node.href || '';
+                                if (href.includes('-extension://')) {
+                                    node.remove();
+                                    ExtensionDetector.detected = true;
+                                    ExtensionDetector.blockExtension();
+                                }
+                            }
+                            if (node.tagName === 'STYLE') {
+                                const content = node.textContent || '';
+                                if (content.includes('chrome-extension') ||
+                                    content.includes('moz-extension') ||
+                                    content.includes('[data-extension')) {
+                                    node.remove();
+                                    ExtensionDetector.detected = true;
+                                    ExtensionDetector.blockExtension();
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            observer.observe(document.head, {
+                childList: true,
+                subtree: true
+            });
+
+            if (document.body) {
+                observer.observe(document.body, {
+                    childList: true,
+                    subtree: true
+                });
+            }
+        }
+    };
+
+    // Page Integrity Verification
+    const IntegrityCheck = {
+        checksum: '',
+
+        init: function () {
+            this.checksum = this.calculateChecksum();
+            this.verify();
+            setInterval(() => this.verify(), 2000);
+        },
+
+        calculateChecksum: function () {
+            const criticalElements = document.querySelectorAll('form, input[type="password"], script[src]');
+            let sum = 0;
+            criticalElements.forEach(el => {
+                sum += el.outerHTML.length;
+            });
+            return sum;
+        },
+
+        verify: function () {
+            if (ExtensionDetector.checkForExtensions()) {
+                ExtensionDetector.blockExtension();
+            }
+
+            if (!SecurityToken.validate() && window.location.pathname !== '/LMS_LP.aspx') {
+                window.location.href = '/LMS_LP.aspx';
+            }
+
+            const currentChecksum = this.calculateChecksum();
+            if (Math.abs(currentChecksum - this.checksum) > 1000) {
+                console.warn('Page integrity violation detected');
+                this.checksum = currentChecksum;
+            }
+
+            SecurityToken.rotate();
+        }
+    };
+
+    // Console Protection
+    const ConsoleProtection = {
+        init: function () {
+            if (window.location.hostname !== 'localhost') {
+                const noop = () => { };
+                ['log', 'debug', 'info', 'warn', 'error', 'trace', 'table', 'dir', 'dirxml', 'group', 'groupEnd'].forEach(method => {
+                    console[method] = noop;
+                });
+            }
+
+            document.addEventListener('keydown', (e) => {
+                if (e.keyCode === 123 ||
+                    (e.ctrlKey && e.shiftKey && (e.keyCode === 73 || e.keyCode === 74 || e.keyCode === 67)) ||
+                    (e.ctrlKey && e.keyCode === 85)) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return false;
+                }
+            });
+
+            document.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                return false;
+            });
+        }
+    };
+
+    // Event Listener Protection
+    const EventProtection = {
+        init: function () {
+            const originalAddEventListener = EventTarget.prototype.addEventListener;
+            EventTarget.prototype.addEventListener = function (type, listener, options) {
+                const stack = new Error().stack;
+                if (stack && stack.includes('extension://')) {
+                    console.warn('Extension event listener detected');
+                    ExtensionDetector.blockExtension();
+                    return;
+                }
+
+                return originalAddEventListener.call(this, type, listener, options);
+            };
+        }
+    };
+
+    // Suspicious Activity Monitor
+    const SuspiciousActivityMonitor = {
+        activities: [],
+        threshold: 10,
+
+        recordActivity(type) {
+            this.activities.push({
+                type: type,
+                timestamp: Date.now()
+            });
+
+            console.warn('Suspicious activity recorded:', type);
+
+            if (this.activities.length >= this.threshold) {
+                ExtensionDetector.blockExtension();
+            }
+        }
+    };
+
+
+    const TrustedTypesManager = {
+        policies: {},
+        initialized: false,
+
+        init: function () {
+            if (this.initialized || !window.trustedTypes) {
+                return;
+            }
+
+            try {
+                this.policies.default = trustedTypes.createPolicy('default', {
+                    createHTML: (input) => {
+                        return this.sanitizeHTML(input);
+                    },
+                    createScript: (input) => {
+                        if (this.isTrustedScript(input)) {
+                            return input;
+                        }
+                        throw new Error('Untrusted script blocked by Trusted Types');
+                    },
+                    createScriptURL: (input) => {
+                        if (this.isTrustedScriptURL(input)) {
+                            return input;
+                        }
+                        throw new Error('Untrusted script URL blocked by Trusted Types');
+                    }
+                });
+
+                this.initialized = true;
+            } catch (error) {
+                console.error('Failed to initialize Trusted Types:', error);
+            }
+        },
+
+        sanitizeHTML: function (input) {
+            if (!input) return '';
+            input = String(input);
+            input = input.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+            input = input.replace(/on\w+\s*=\s*["'][^"']*["']/gi, '');
+            input = input.replace(/javascript:/gi, '');
+            input = input.replace(/<(iframe|object|embed|link|meta|base)\b[^>]*>/gi, '');
+            return input;
+        },
+
+        isTrustedScript: function (script) {
+            const dangerousPatterns = [
+                /eval\s*\(/,
+                /Function\s*\(/,
+                /\.innerHTML\s*=/,
+                /document\.write/
+            ];
+
+            for (let pattern of dangerousPatterns) {
+                if (pattern.test(script)) {
+                    return false;
+                }
+            }
+            return true;
+        },
+
+        isTrustedScriptURL: function (url) {
+            const trustedDomains = [
+                window.location.origin,
+                'https://code.jquery.com',
+                'https://cdnjs.cloudflare.com'
+            ];
+
+            try {
+                const urlObj = new URL(url, window.location.origin);
+                for (let domain of trustedDomains) {
+                    if (urlObj.origin === domain || urlObj.href.startsWith(domain)) {
+                        return true;
+                    }
+                }
+                return false;
+            } catch (e) {
+                return false;
+            }
+        }
+    };
+
+    // CSP Enforcement
+    const CSPEnforcement = {
+        violations: [],
+        nonce: null,
+
+        init: function () {
+            this.extractNonce();
+            this.monitorViolations();
+        },
+
+        extractNonce: function () {
+            const currentScript = document.currentScript;
+            if (currentScript && currentScript.nonce) {
+                this.nonce = currentScript.nonce;
+            }
+        },
+
+        monitorViolations: function () {
+            document.addEventListener('securitypolicyviolation', (e) => {
+                const violation = {
+                    blockedURI: e.blockedURI,
+                    violatedDirective: e.violatedDirective,
+                    timestamp: new Date().toISOString()
+                };
+
+                this.violations.push(violation);
+                console.error('CSP Violation:', violation);
+            });
+        }
+    };
+
+  
+    function initSecurity() {
+        if (!CONFIG.enableProtection) return;
+
+        try {
+            if (ExtensionDetector.checkForExtensions()) {
+                ExtensionDetector.blockExtension();
+                return;
+            }
+
+            // Initialize NEW protections
+            if (CONFIG.enableDataObfuscation) {
+                DataObfuscation.init();
+            }
+
+            TamperDetection.init();
+
+            if (CONFIG.enableDevToolsProtection) {
+                DevToolsDetection.init();
+            }
+
+            if (CONFIG.enableMemoryProtection) {
+                MemoryProtection.init();
+            }
+
+            ProxyDetection.init();
+            EventProtection.init();
+
+            if (CONFIG.enableDOMMonitoring) {
+                DOMProtection.init();
+            }
+
+            if (CONFIG.enableNetworkMonitoring) {
+                NetworkProtection.init();
+            }
+
+            StyleProtection.init();
+
+            if (CONFIG.enableIntegrityCheck) {
+                IntegrityCheck.init();
+            }
+
+            ConsoleProtection.init();
+
+            if (CONFIG.enableTrustedTypes) {
+                TrustedTypesManager.init();
+            }
+
+            if (CONFIG.enableCSPEnforcement) {
+                CSPEnforcement.init();
+            }
+
+            setInterval(() => {
+                if (ExtensionDetector.checkForExtensions()) {
+                    ExtensionDetector.blockExtension();
+                }
+            }, 500);
+
+            window.addEventListener('beforeunload', (e) => {
+                if (ExtensionDetector.detected) {
+                    e.preventDefault();
+                    e.returnValue = '';
+                    return '';
+                }
+            });
+
+            window.addEventListener('popstate', (e) => {
+                if (ExtensionDetector.detected) {
+                    e.preventDefault();
+                    window.history.pushState(null, '', window.location.href);
+                }
+            });
+
+            setInterval(() => {
+                if (!window.__SECURITY_ACTIVE__) {
+                    window.__SECURITY_ACTIVE__ = true;
+                    initSecurity();
+                }
+            }, 3000);
+
+            window.__SECURITY_ACTIVE__ = true;
+
+        } catch (e) {
+            setTimeout(initSecurity, 1000);
+        }
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initSecurity);
+    } else {
+        initSecurity();
+    }
+
+    window.addEventListener('load', initSecurity);
+
+    if (document.currentScript) {
+        Object.defineProperty(document.currentScript, 'remove', {
+            value: function () {
+                console.error('Security script removal blocked');
+                return false;
+            },
+            writable: false,
+            configurable: false
+        });
+    }
+
+
+  
+  
+
+    const CryptoUtils = {
+        key: null,
+
+        async generateKey() {
+            try {
+                this.key = await crypto.subtle.generateKey(
+                    { name: 'AES-GCM', length: 256 },
+                    true,
+                    ['encrypt', 'decrypt']
+                );
+                CONFIG.encryptionKey = this.key;
+            } catch (e) {
+                console.warn('Crypto API not available, using fallback');
+                this.key = this.generateFallbackKey();
+            }
+        },
+
+        generateFallbackKey() {
+            const array = new Uint8Array(32);
+            crypto.getRandomValues(array);
+            return Array.from(array).map(b => b.toString(16).padStart(2, '0')).join('');
+        },
+
+        async encrypt(text) {
+            if (!text) return text;
+
+            try {
+                if (this.key && this.key.algorithm) {
+                    const encoder = new TextEncoder();
+                    const data = encoder.encode(text);
+                    const iv = crypto.getRandomValues(new Uint8Array(12));
+
+                    const encrypted = await crypto.subtle.encrypt(
+                        { name: 'AES-GCM', iv: iv },
+                        this.key,
+                        data
+                    );
+
+                    const combined = new Uint8Array(iv.length + encrypted.byteLength);
+                    combined.set(iv);
+                    combined.set(new Uint8Array(encrypted), iv.length);
+
+                    return btoa(String.fromCharCode(...combined));
+                }
+
+                return this.simpleCipher(text, true);
+            } catch (e) {
+                return this.simpleCipher(text, true);
+            }
+        },
+
+        async decrypt(encryptedText) {
+            if (!encryptedText) return encryptedText;
+
+            try {
+                if (this.key && this.key.algorithm) {
+                    const combined = new Uint8Array(
+                        atob(encryptedText).split('').map(c => c.charCodeAt(0))
+                    );
+
+                    const iv = combined.slice(0, 12);
+                    const data = combined.slice(12);
+
+                    const decrypted = await crypto.subtle.decrypt(
+                        { name: 'AES-GCM', iv: iv },
+                        this.key,
+                        data
+                    );
+
+                    const decoder = new TextDecoder();
+                    return decoder.decode(decrypted);
+                }
+
+                return this.simpleCipher(encryptedText, false);
+            } catch (e) {
+                return this.simpleCipher(encryptedText, false);
+            }
+        },
+
+        simpleCipher(text, encrypt) {
+            if (!text) return text;
+
+            const shift = encrypt ? 7 : -7;
+            return text.split('').map(char => {
+                const code = char.charCodeAt(0);
+                return String.fromCharCode(code + shift);
+            }).join('');
+        },
+
+        hash(text) {
+            let hash = 0;
+            for (let i = 0; i < text.length; i++) {
+                const char = text.charCodeAt(i);
+                hash = ((hash << 5) - hash) + char;
+                hash = hash & hash;
+            }
+            return hash.toString(16);
+        }
+    };
+
+
+    const DataProtection = {
+        sensitiveSelectors: [
+            'input[type="password"]',
+            'input[type="email"]',
+            'input[name*="password"]',
+            'input[name*="email"]',
+            'input[name*="ssn"]',
+            'input[name*="credit"]',
+            'input[name*="card"]',
+            'input[id*="password"]',
+            'input[id*="email"]',
+            '.sensitive-data',
+            '[data-sensitive="true"]'
+        ],
+
+        protectedElements: new WeakMap(),
+        encryptedStorage: new Map(),
+
+        init() {
+            this.protectSensitiveInputs();
+            this.setupInputEncryption();
+            this.preventCopyPaste();
+            this.protectAgainstScreenCapture();
+            this.setupFormProtection();
+            this.monitorDataExfiltration();
+        },
+
+        protectSensitiveInputs() {
+            const protectInput = (input) => {
+                if (this.protectedElements.has(input)) return;
+
+                // Store original value encrypted
+                const originalDescriptor = Object.getOwnPropertyDescriptor(
+                    HTMLInputElement.prototype,
+                    'value'
+                );
+
+                const protectedValue = { data: '' };
+                this.protectedElements.set(input, protectedValue);
+
+                // Override value property
+                Object.defineProperty(input, 'value', {
+                    get: function () {
+                        return protectedValue.data;
+                    },
+                    set: function (val) {
+                        protectedValue.data = val;
+                        // Don't store in DOM
+                        originalDescriptor.set.call(this, '•'.repeat(val.length));
+                    },
+                    configurable: true
+                });
+
+                // Prevent inspection
+                input.setAttribute('autocomplete', 'off');
+                input.setAttribute('data-protected', 'true');
+
+                // Add visual masking
+                if (input.type !== 'password') {
+                    input.addEventListener('input', (e) => {
+                        const realValue = protectedValue.data;
+                        if (realValue) {
+                            // Show only last character briefly
+                            setTimeout(() => {
+                                originalDescriptor.set.call(input, '•'.repeat(realValue.length));
+                            }, 500);
+                        }
+                    });
+                }
+            };
+
+            // Protect existing inputs
+            this.sensitiveSelectors.forEach(selector => {
+                document.querySelectorAll(selector).forEach(protectInput);
+            });
+
+            // Watch for new inputs
+            const observer = new MutationObserver((mutations) => {
+                mutations.forEach(mutation => {
+                    mutation.addedNodes.forEach(node => {
+                        if (node.nodeType === 1) {
+                            this.sensitiveSelectors.forEach(selector => {
+                                if (node.matches && node.matches(selector)) {
+                                    protectInput(node);
+                                }
+                                node.querySelectorAll && node.querySelectorAll(selector).forEach(protectInput);
+                            });
+                        }
+                    });
+                });
+            });
+
+            observer.observe(document.body || document.documentElement, {
+                childList: true,
+                subtree: true
+            });
+        },
+
+        setupInputEncryption() {
+            document.addEventListener('submit', async (e) => {
+                const form = e.target;
+                if (!form.tagName || form.tagName !== 'FORM') return;
+
+                // Encrypt sensitive data before submission
+                const inputs = form.querySelectorAll(this.sensitiveSelectors.join(','));
+
+                for (let input of inputs) {
+                    if (this.protectedElements.has(input)) {
+                        const protectedValue = this.protectedElements.get(input);
+                        const encrypted = await CryptoUtils.encrypt(protectedValue.data);
+
+                        // Create hidden field with encrypted value
+                        const hidden = document.createElement('input');
+                        hidden.type = 'hidden';
+                        hidden.name = input.name + '_encrypted';
+                        hidden.value = encrypted;
+                        form.appendChild(hidden);
+                    }
+                }
+            }, true);
+        },
+
+        preventCopyPaste() {
+            this.sensitiveSelectors.forEach(selector => {
+                document.addEventListener('copy', (e) => {
+                    if (e.target.matches && e.target.matches(selector)) {
+                        e.preventDefault();
+                        e.clipboardData.setData('text/plain', '');
+                        console.warn('Copy operation blocked for security');
+                    }
+                }, true);
+
+                document.addEventListener('cut', (e) => {
+                    if (e.target.matches && e.target.matches(selector)) {
+                        e.preventDefault();
+                        console.warn('Cut operation blocked for security');
+                    }
+                }, true);
+
+                document.addEventListener('paste', (e) => {
+                    if (e.target.matches && e.target.matches(selector)) {
+                        // Allow paste but sanitize
+                        e.preventDefault();
+                        const text = (e.clipboardData || window.clipboardData).getData('text');
+                        const sanitized = text.replace(/[<>\"\']/g, '');
+                        if (e.target.value !== undefined) {
+                            e.target.value = sanitized;
+                        }
+                    }
+                }, true);
+            });
+        },
+
+        protectAgainstScreenCapture() {
+            // Make it harder to screenshot sensitive data
+            this.sensitiveSelectors.forEach(selector => {
+                const style = document.createElement('style');
+                style.textContent = `
+                    ${selector} {
+                        -webkit-user-select: none;
+                        -moz-user-select: none;
+                        -ms-user-select: none;
+                        user-select: none;
+                    }
+                `;
+                document.head.appendChild(style);
+            });
+
+            // Detect screenshot attempts (Windows/Mac)
+            document.addEventListener('keyup', (e) => {
+                // PrintScreen key
+                if (e.key === 'PrintScreen') {
+                    navigator.clipboard.writeText('');
+                    alert('Screenshots are disabled for security reasons');
+                }
+
+                // Cmd+Shift+3/4 (Mac) or Windows+Shift+S
+                if ((e.metaKey || e.key === 'Meta') && e.shiftKey) {
+                    console.warn('Screenshot attempt detected');
+                }
+            });
+        },
+
+        setupFormProtection() {
+            document.addEventListener('submit', (e) => {
+                const form = e.target;
+                if (!form.tagName || form.tagName !== 'FORM') return;
+
+                // Add integrity hash
+                const formData = new FormData(form);
+                const dataString = Array.from(formData.entries())
+                    .map(([key, value]) => `${key}=${value}`)
+                    .join('&');
+
+                const hash = CryptoUtils.hash(dataString);
+
+                const integrityField = document.createElement('input');
+                integrityField.type = 'hidden';
+                integrityField.name = '__FormIntegrity';
+                integrityField.value = hash;
+                form.appendChild(integrityField);
+            }, true);
+        },
+
+        monitorDataExfiltration() {
+            // Monitor for suspicious data access patterns
+            let accessCount = 0;
+            const accessLog = [];
+
+            const monitorAccess = (element) => {
+                const descriptor = Object.getOwnPropertyDescriptor(
+                    HTMLInputElement.prototype,
+                    'value'
+                );
+
+                Object.defineProperty(element, 'value', {
+                    get: function () {
+                        accessCount++;
+                        accessLog.push({
+                            timestamp: Date.now(),
+                            element: this.name || this.id,
+                            stack: new Error().stack
+                        });
+
+                        // Suspicious if accessed too frequently
+                        if (accessCount > 50) {
+                            console.error('Suspicious data access detected');
+                            SuspiciousActivityMonitor.recordActivity('excessive-data-access');
+                        }
+
+                        return descriptor.get.call(this);
+                    },
+                    set: descriptor.set,
+                    configurable: true
+                });
+            };
+
+            // Monitor sensitive inputs
+            this.sensitiveSelectors.forEach(selector => {
+                document.querySelectorAll(selector).forEach(monitorAccess);
+            });
+        }
+    };
+
+
+    const ShadowDOMProtection = {
+        protectedRoots: new WeakSet(),
+
+        init() {
+            this.protectShadowDOM();
+            this.preventShadowDOMInjection();
+            this.monitorShadowDOMAccess();
+        },
+
+        protectShadowDOM() {
+            // Override attachShadow to add protection
+            const originalAttachShadow = Element.prototype.attachShadow;
+
+            Element.prototype.attachShadow = function (init) {
+                const shadowRoot = originalAttachShadow.call(this, init);
+                ShadowDOMProtection.protectedRoots.add(shadowRoot);
+
+                // Make shadow root harder to access
+                Object.defineProperty(this, 'shadowRoot', {
+                    get: function () {
+                        const stack = new Error().stack;
+                        if (stack.includes('extension://')) {
+                            console.error('Extension trying to access shadow DOM');
+                            return null;
+                        }
+                        return shadowRoot;
+                    },
+                    configurable: false
+                });
+
+                return shadowRoot;
+            };
+        },
+
+        preventShadowDOMInjection() {
+            // Monitor shadow DOM mutations
+            const observer = new MutationObserver((mutations) => {
+                mutations.forEach(mutation => {
+                    if (mutation.target.shadowRoot) {
+                        mutation.addedNodes.forEach(node => {
+                            if (node.nodeType === 1) {
+                                // Check for suspicious scripts
+                                const scripts = node.querySelectorAll('script');
+                                scripts.forEach(script => {
+                                    if (script.src && script.src.includes('extension://')) {
+                                        script.remove();
+                                        SuspiciousActivityMonitor.recordActivity('shadow-dom-injection');
+                                    }
+                                });
+                            }
+                        });
+                    }
+                });
+            });
+
+            observer.observe(document.documentElement, {
+                childList: true,
+                subtree: true
+            });
+        },
+
+        monitorShadowDOMAccess() {
+            // Track shadow DOM access attempts
+            const originalQuerySelector = Document.prototype.querySelector;
+            const originalQuerySelectorAll = Document.prototype.querySelectorAll;
+
+            Document.prototype.querySelector = function (selector) {
+                if (selector.includes('::shadow') || selector.includes('/deep/')) {
+                    console.warn('Suspicious shadow DOM selector detected');
+                    SuspiciousActivityMonitor.recordActivity('shadow-dom-access');
+                }
+                return originalQuerySelector.call(this, selector);
+            };
+
+            Document.prototype.querySelectorAll = function (selector) {
+                if (selector.includes('::shadow') || selector.includes('/deep/')) {
+                    console.warn('Suspicious shadow DOM selector detected');
+                    SuspiciousActivityMonitor.recordActivity('shadow-dom-access');
+                }
+                return originalQuerySelectorAll.call(this, selector);
+            };
+        }
+    };
+
+   
+    const ClipboardProtection = {
+        init() {
+            this.monitorClipboardAccess();
+            this.preventDataLeakage();
+        },
+
+        monitorClipboardAccess() {
+            const originalWrite = navigator.clipboard.writeText;
+            const originalRead = navigator.clipboard.readText;
+
+            if (navigator.clipboard.writeText) {
+                navigator.clipboard.writeText = async function (text) {
+                    // Check if called by extension
+                    const stack = new Error().stack;
+                    if (stack.includes('extension://')) {
+                        console.error('Extension clipboard access blocked');
+                        SuspiciousActivityMonitor.recordActivity('clipboard-access');
+                        return Promise.reject(new Error('Access denied'));
+                    }
+
+                    return originalWrite.call(this, text);
+                };
+            }
+
+            if (navigator.clipboard.readText) {
+                navigator.clipboard.readText = async function () {
+                    const stack = new Error().stack;
+                    if (stack.includes('extension://')) {
+                        console.error('Extension clipboard read blocked');
+                        SuspiciousActivityMonitor.recordActivity('clipboard-read');
+                        return Promise.reject(new Error('Access denied'));
+                    }
+
+                    return originalRead.call(this);
+                };
+            }
+        },
+
+        preventDataLeakage() {
+            // Clear clipboard on page unload
+            window.addEventListener('beforeunload', () => {
+                try {
+                    if (navigator.clipboard.writeText) {
+                        navigator.clipboard.writeText('');
+                    }
+                } catch (e) {
+                    // Ignore errors
+                }
+            });
+
+            // Monitor copy events
+            document.addEventListener('copy', (e) => {
+                const selection = window.getSelection().toString();
+
+                // Check if sensitive data is being copied
+                if (selection.length > 100) {
+                    console.warn('Large text copy detected');
+                    SuspiciousActivityMonitor.recordActivity('large-copy');
+                }
+            });
+        }
+    };
+
+
+    const MemoryWiper = {
+        sensitiveData: new WeakMap(),
+        wipingInterval: null,
+
+        init() {
+            this.setupAutoWipe();
+            this.wipeOnUnload();
+        },
+
+        setupAutoWipe() {
+            // Periodically wipe sensitive data from memory
+            this.wipingInterval = setInterval(() => {
+                this.wipeSensitiveData();
+            }, 60000); // Every minute
+        },
+
+        wipeSensitiveData() {
+            // Overwrite input values
+            DataProtection.sensitiveSelectors.forEach(selector => {
+                document.querySelectorAll(selector).forEach(input => {
+                    if (!document.activeElement || document.activeElement !== input) {
+                        const descriptor = Object.getOwnPropertyDescriptor(input, 'value');
+                        if (descriptor && descriptor.set) {
+                            // Overwrite with random data then clear
+                            const randomData = crypto.getRandomValues(new Uint8Array(32));
+                            descriptor.set.call(input, Array.from(randomData).join(''));
+                            descriptor.set.call(input, '');
+                        }
+                    }
+                });
+            });
+
+            // Force garbage collection (if available)
+            if (window.gc) {
+                window.gc();
+            }
+        },
+
+        wipeOnUnload() {
+            window.addEventListener('beforeunload', () => {
+                this.wipeSensitiveData();
+
+                // Clear all protected elements
+                DataProtection.protectedElements = new WeakMap();
+                DataProtection.encryptedStorage.clear();
+            });
+
+            window.addEventListener('pagehide', () => {
+                this.wipeSensitiveData();
+            });
+        }
+    };
+
+
+    const SuspiciousActivityMonitor = {
+        activities: [],
+        threshold: CONFIG.suspiciousActivityThreshold,
+
+        recordActivity(type) {
+            this.activities.push({
+                type: type,
+                timestamp: Date.now(),
+                stack: new Error().stack
+            });
+
+            console.warn('Suspicious activity recorded:', type);
+
+            if (this.activities.length >= this.threshold) {
+                this.triggerSecurityResponse();
+            }
+        },
+
+        triggerSecurityResponse() {
+            console.error('Security threshold exceeded! Taking protective action...');
+
+            if (CONFIG.enableAutoLogoutOnSuspiciousActivity) {
+                // Clear all data
+                MemoryWiper.wipeSensitiveData();
+
+                // Redirect to logout
+                setTimeout(() => {
+                    window.location.href = '/logout.aspx';
+                }, 1000);
+            }
+
+            // Block further interactions
+            const overlay = document.createElement('div');
+            overlay.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(255, 0, 0, 0.1);
+                z-index: 999999;
+                pointer-events: all;
+            `;
+            document.body.appendChild(overlay);
+
+            alert('Suspicious activity detected. For your security, this session will be terminated.');
+        }
+    };
+
+
+    const DOMMutationHardening = {
+        criticalElements: new WeakSet(),
+        elementHashes: new WeakMap(),
+
+        init() {
+            this.protectCriticalElements();
+            this.monitorMutations();
+            this.preventUnauthorizedModifications();
+        },
+
+        protectCriticalElements() {
+            // Identify and protect critical elements
+            const criticalSelectors = [
+                'form',
+                'input[type="hidden"]',
+                'script[src]',
+                '[data-critical="true"]'
+            ];
+
+            criticalSelectors.forEach(selector => {
+                document.querySelectorAll(selector).forEach(element => {
+                    this.criticalElements.add(element);
+                    this.elementHashes.set(element, this.hashElement(element));
+
+                    // Freeze attributes
+                    Object.freeze(element.attributes);
+                });
+            });
+        },
+
+        hashElement(element) {
+            const attributes = Array.from(element.attributes)
+                .map(attr => `${attr.name}=${attr.value}`)
+                .join(',');
+            return CryptoUtils.hash(attributes + element.innerHTML);
+        },
+
+        monitorMutations() {
+            const observer = new MutationObserver((mutations) => {
+                mutations.forEach(mutation => {
+                    if (this.criticalElements.has(mutation.target)) {
+                        const currentHash = this.hashElement(mutation.target);
+                        const originalHash = this.elementHashes.get(mutation.target);
+
+                        if (currentHash !== originalHash) {
+                            console.error('Critical element modified!', mutation.target);
+                            SuspiciousActivityMonitor.recordActivity('critical-element-modified');
+
+                            // Optionally restore original state
+                            // mutation.target.setAttribute(...);
+                        }
+                    }
+                });
+            });
+
+            observer.observe(document.documentElement, {
+                attributes: true,
+                childList: true,
+                subtree: true,
+                attributeOldValue: true
+            });
+        },
+
+        preventUnauthorizedModifications() {
+            // Protect against direct property modifications
+            const protectProperty = (obj, prop) => {
+                const descriptor = Object.getOwnPropertyDescriptor(obj, prop);
+                if (descriptor && descriptor.configurable) {
+                    Object.defineProperty(obj, prop, {
+                        set: function (value) {
+                            const stack = new Error().stack;
+                            if (stack.includes('extension://')) {
+                                console.error('Extension modification blocked');
+                                SuspiciousActivityMonitor.recordActivity('property-modification');
+                                return;
+                            }
+                            descriptor.set.call(this, value);
+                        },
+                        get: descriptor.get,
+                        configurable: false
+                    });
+                }
+            };
+
+            // Protect critical properties
+            protectProperty(HTMLFormElement.prototype, 'action');
+            protectProperty(HTMLInputElement.prototype, 'type');
+        }
+    };
+
+   
+    const SessionSecurity = {
+        lastActivity: Date.now(),
+        sessionTimer: null,
+
+        init() {
+            this.monitorActivity();
+            this.setupSessionTimeout();
+            this.preventSessionHijacking();
+        },
+
+        monitorActivity() {
+            const events = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart'];
+
+            events.forEach(event => {
+                document.addEventListener(event, () => {
+                    this.lastActivity = Date.now();
+                }, true);
+            });
+        },
+
+        setupSessionTimeout() {
+            this.sessionTimer = setInterval(() => {
+                const inactiveTime = Date.now() - this.lastActivity;
+
+                if (inactiveTime > CONFIG.sessionTimeout) {
+                    console.warn('Session timeout due to inactivity');
+                    this.terminateSession();
+                }
+            }, 60000); // Check every minute
+        },
+
+        preventSessionHijacking() {
+            // Verify session integrity
+            const originalFingerprint = this.generateFingerprint();
+
+            setInterval(() => {
+                const currentFingerprint = this.generateFingerprint();
+
+                if (currentFingerprint !== originalFingerprint) {
+                    console.error('Session fingerprint mismatch!');
+                    SuspiciousActivityMonitor.recordActivity('session-hijack-attempt');
+                }
+            }, 30000);
+        },
+
+        generateFingerprint() {
+            const data = [
+                navigator.userAgent,
+                navigator.language,
+                screen.width,
+                screen.height,
+                new Date().getTimezoneOffset()
+            ].join('|');
+
+            return CryptoUtils.hash(data);
+        },
+
+        terminateSession() {
+            MemoryWiper.wipeSensitiveData();
+            clearInterval(this.sessionTimer);
+            window.location.href = '/logout.aspx';
+        }
+    };
+
+
+    async function initializeEnhancedDOMSecurity() {
+        console.log('Initializing Enhanced DOM Security...');
+
+        try {
+            // Generate encryption key
+            await CryptoUtils.generateKey();
+
+            // Initialize all protection modules
+            if (CONFIG.enableFormProtection) {
+                DataProtection.init();
+            }
+
+            if (CONFIG.enableShadowDOMProtection) {
+                ShadowDOMProtection.init();
+            }
+
+            if (CONFIG.enableClipboardProtection) {
+                ClipboardProtection.init();
+            }
+
+            if (CONFIG.enableMemoryWiping) {
+                MemoryWiper.init();
+            }
+
+            DOMMutationHardening.init();
+            SessionSecurity.init();
+
+            console.log('Enhanced DOM Security initialized successfully');
+
+            // Mark as active
+            window.__DOM_SECURITY_ACTIVE__ = true;
+
+        } catch (error) {
+            console.error('Failed to initialize Enhanced DOM Security:', error);
+        }
+    }
+
+    // Auto-initialize
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initializeEnhancedDOMSecurity);
+    } else {
+        initializeEnhancedDOMSecurity();
+    }
+
+    window.addEventListener('load', () => {
+        if (!window.__DOM_SECURITY_ACTIVE__) {
+            console.warn('Re-initializing DOM Security...');
+            initializeEnhancedDOMSecurity();
+        }
+    });
+
+    // Export secure API for legitimate use
+    window.SecureDOMAPI = {
+        encryptData: CryptoUtils.encrypt.bind(CryptoUtils),
+        decryptData: CryptoUtils.decrypt.bind(CryptoUtils),
+        isSecurityActive: () => window.__DOM_SECURITY_ACTIVE__ === true,
+        getSuspiciousActivityCount: () => SuspiciousActivityMonitor.activities.length
+    };
+
+    // Prevent this script from being removed
+    Object.defineProperty(document.currentScript, 'remove', {
+        value: function () {
+            console.error('Security script removal blocked');
+            SuspiciousActivityMonitor.recordActivity('script-removal-attempt');
+            return false;
+        },
+        writable: false,
+        configurable: false
+    });
+
+})();
